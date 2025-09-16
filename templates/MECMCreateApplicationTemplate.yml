@@ -1,42 +1,90 @@
 parameters:
-  dryRun: False
-  revisionVersion: ''
-  releaseTo: ''         # KB or BB
-  releaseRing: 'PROD'
-  scriptsFolder: ''
-  mecmSiteServer: ''
-  mecmSiteCode: ''
-  applicationFolderPath: ''
-  iconRepo: ''
-  iconFileName: ''
-  contentDistributionPoints: ''   # "Corp;VPN"
+  - name: dryRun # Only allows validation and the gates to run
+    type: boolean
+    default: true
 
-stages:
-- stage: Create_MECM_App
-  displayName: 'Create MECM Application'
-  dependsOn: Upload_MSI
-  jobs:
-  - job: CreateApp
-    pool: { vmImage: 'windows-2022' }
-    steps:
-    - download: current
-      artifact: drop
-      displayName: 'Download MSI artifact'
-    - task: PowerShell@2
-      name: createApp
-      displayName: 'Create & distribute MECM application'
-      inputs:
-        targetType: filePath
-        filePath: ${{ parameters.scriptsFolder }}\CreateMECMApplicationToDeploy.ps1
-        arguments: >
-          -DryRun:(${ if eq(parameters.dryRun, True) }$true${ else }$false${ end })
-          -ReleaseTo '${{ parameters.releaseTo }}'
-          -SoftwareVersion '${{ parameters.revisionVersion }}'
-          -ReleaseRing '${{ parameters.releaseRing }}'
-          -SCCMSiteServer '${{ parameters.mecmSiteServer }}'
-          -SCCMSiteCode '${{ parameters.mecmSiteCode }}'
-          -ApplicationFolderPath '${{ parameters.applicationFolderPath }}'
-          -MsiFolderLocation "$(Pipeline.Workspace)\drop"
-          -IconRepo '${{ parameters.iconRepo }}'
-          -IconFileName '${{ parameters.iconFileName }}'
-          -ContentDistributionPoints '${{ parameters.contentDistributionPoints }}'
+  - name: taskGroupName # Unique names for jobs
+    type: string
+
+  - name: revisionVersion
+    type: string
+
+  - name: releaseTo
+    type: string
+
+  - name: sourceFolder
+    type: string
+
+  - name: scriptsFolder # Expected to be checked out prior to this template
+    type: string
+
+  - name: mecmSiteServer 
+    type: string
+
+  - name: msiFolderLocation 
+    type: string
+
+  - name: applicationFolderPath 
+    type: string
+
+  - name: contentDistributionPoints 
+    type: string
+
+steps:
+  #Create Drop folder if it doesn't exist
+  - task: PowerShell@2
+    condition: eq(${{parameters.dryRun}}, False)
+    name: create${{parameters.taskGroupName}}DropFolder
+    displayName: Create Drop Folder
+    inputs:
+      targetType: inline
+      script: |
+        $path = '${{parameters.msiFolderLocation}}\KB INTOUCH ${{parameters.releaseTo}}' 
+        If(!(test-path $path)){New-Item -ItemType Directory -Path $path}
+
+  # Copy files from work folder to target drop folder
+  - task: CopyFiles@2
+    condition: eq(${{parameters.dryRun}}, False)
+    name: copy${{parameters.taskGroupName}}ToDrop
+    displayName: Copy MSI to Drop Folder
+    inputs:
+      sourceFolder: ${{parameters.sourceFolder}}
+      contents: "InTouch-Client-${{parameters.releaseTo}}-${{parameters.revisionVersion}}.msi"
+      targetFolder: '${{parameters.msiFolderLocation}}\KB INTOUCH ${{parameters.releaseTo}}'
+      cleanTargetFolder: true
+
+  - task: PowerShell@2
+    condition: and(succeeded(), eq(${{parameters.dryRun}}, False))
+    name: debug${{parameters.taskGroupName}}DropFolder
+    displayName: Confirm Drop
+    inputs:
+      targetType: inline
+      script: |
+        $msiPath = "${{parameters.msiFolderLocation}}\KB INTOUCH ${{parameters.releaseTo}}\InTouch-Client-${{parameters.releaseTo}}-${{parameters.revisionVersion}}.msi"
+        $msiExists = Test-Path -Path $msiPath
+        if ($msiExists) {
+          Write-Host "MSI Found at $msiPath"
+        } else {
+          Write-Host "##[error]MSI Missing, expected $msiPath"
+          exit 1
+        }
+
+  #Delete existing Application and its associated deployments before deploying new Application to MECM
+  - task: powershell@2
+    condition: eq(${{parameters.dryRun}}, False)
+    name: deleteExistingAppFor${{parameters.taskGroupName}}
+    displayName: Delete Existing MECM Application and associated deployments
+    inputs:
+      targetType: filePath
+      filePath: ${{parameters.scriptsFolder}}\DeleteExistingApplicationDeploymentsInMECM.ps1
+      arguments: "-packageName InTouch-Client-${{parameters.releaseTo}} -MECMsiteServer ${{parameters.mecmSiteServer}}"
+
+  #Create Application to deploy to MECM
+  - task: powershell@2
+    condition: eq(${{parameters.dryRun}}, False)
+    name: createApplicationFor${{parameters.taskGroupName}}
+    displayName: Create MECM Application to Deploy
+    inputs:
+      targetType: filePath
+      filePath: ${{parameters.scriptsFolder}}\CreateMECMApplicationToDeploy.ps1
+      arguments: '-packageName InTouch-Client-${{parameters.releaseTo}}-${{parameters.revisionVersion}} -releaseTo ${{parameters.releaseTo}} -softwareVersion ${{parameters.revisionVersion}} -SCCMsiteServer ${{parameters.mecmSiteServer}} -applicationFolderPath "${{parameters.applicationFolderPath}}" -msiFolderLocation "${{parameters.msiFolderLocation}}" -contentDistributionPoints "${{parameters.contentDistributionPoints}}"'
