@@ -21,13 +21,45 @@ stages:
       SourceRepo: ${{parameters.SourceRepo}}
       envName: 'PRD-WLG'
       condition: succeeded()
-
-# Release to Environment
-  - template: Template-Activate-DeployandSeal.yml
-    parameters:
+  
+#Create Application to deploy to MECM
+  - task: powershell@2
+    condition: eq(${{parameters.dryRun}}, False)
+    name: createApplicationFor${{parameters.taskGroupName}}
+    displayName: Create MECM Application to Deploy
+    inputs:
+      targetType: filePath
+      filePath: ${{parameters.scriptsFolder}}\CreateMECMApplicationToDeploy.ps1
+      arguments: '-packageName InTouch-Client-${{parameters.releaseTo}}-${{parameters.revisionVersion}} -releaseTo ${{parameters.releaseTo}} -softwareVersion ${{parameters.revisionVersion}} -SCCMsiteServer ${{parameters.mecmSiteServer}} -applicationFolderPath "${{parameters.applicationFolderPath}}" -msiFolderLocation "${{parameters.msiFolderLocation}}" -contentDistributionPoints "${{parameters.contentDistributionPoints}}"'
+      
+# Release to PVT Users
+  - template: ReleaseEnvironmentTemplate.yml
+      parameters:
       stageName: 'Citrix_Activate_DeployandSeal'
       stageDisplayName: 'Citrix Activate Deploy and Seal'
       activateVersion: ${{parameters.activateVersion}}   
       appEnvironment: ${{parameters.appEnvironment}}
       envName: ${{variables.envName}}
       condition: succeeded()
+
+  # Release to  Activate KB
+   - template: ReleaseEnvironmentTemplate.yml
+      parameters:
+      stageName: 'Citrix_Activate_DeployandSeal'
+      stageDisplayName: 'Citrix Activate Deploy and Seal'
+      activateVersion: ${{parameters.activateVersion}}   
+      appEnvironment: ${{parameters.appEnvironment}}
+      envName: ${{variables.envName}}
+      condition: succeeded()
+
+ # Release to  All Users
+   - template: ReleaseEnvironmentTemplate.yml
+      parameters:
+      stageName: 'Citrix_Activate_DeployandSeal'
+      stageDisplayName: 'Citrix Activate Deploy and Seal'
+      activateVersion: ${{parameters.activateVersion}}   
+      appEnvironment: ${{parameters.appEnvironment}}
+      envName: ${{variables.envName}}
+      condition: succeeded()
+      
+  #Clean Up Previous Versions
