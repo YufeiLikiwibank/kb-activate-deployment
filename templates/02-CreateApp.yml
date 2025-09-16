@@ -1,1 +1,28 @@
 
+parameters:
+  vmImage: ''
+  mecmSiteServer: ''
+  mecmSiteCode: ''
+  configMgrRepoRoot: ''
+  productBaseName: ''
+  productVersion: ''
+  releaseRing: ''
+
+stages:
+- stage: Create_App
+  displayName: 'Create MECM Application'
+  dependsOn: Upload_MSI
+  jobs:
+  - job: Create
+    pool: { vmImage: ${{ parameters.vmImage }} }
+    steps:
+    - download: current
+      artifact: drop
+    - powershell: |
+        $msi = Get-ChildItem "$(Pipeline.Workspace)\drop\*.msi" | Select-Object -First 1
+        if (-not $msi) { throw "MSI artifact not found." }
+        Import-Module "$(Build.SourcesDirectory)\scripts\CM.Common.psm1" -Force
+        Enter-CMSite -SiteServer '${{ parameters.mecmSiteServer }}' -SiteCode '${{ parameters.mecmSiteCode }}'
+        New-RepoFolderAndCopyMsi -Root '${{ parameters.configMgrRepoRoot }}' -ProductBaseName '${{ parameters.productBaseName }}' -ProductVersion '${{ parameters.productVersion }}' -ReleaseRing '${{ parameters.releaseRing }}' -MsiPath $msi.FullName | Out-Null
+        New-OrUpdate-CMApplicationFromMsi -AppName ('${{ parameters.productBaseName }}' + ' - ' + '${{ parameters.productVersion }}' + ' (' + '${{ parameters.releaseRing }}' + ')') -Publisher 'Kiwibank' -Version '${{ parameters.productVersion }}' -ContentFolder (Join-Path '${{ parameters.configMgrRepoRoot }}' ('${{ parameters.productBaseName }}' + ' - ' + '${{ parameters.productVersion }}' + ' (' + '${{ parameters.releaseRing }}' + ')')) -MsiFullPath (Join-Path (Join-Path '${{ parameters.configMgrRepoRoot }}' ('${{ parameters.productBaseName }}' + ' - ' + '${{ parameters.productVersion }}' + ' (' + '${{ parameters.releaseRing }}' + ')')) $msi.Name)
+      displayName: 'Create CM App from MSI'
