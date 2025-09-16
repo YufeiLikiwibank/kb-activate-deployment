@@ -1,164 +1,143 @@
 trigger: none
 pr: none
 
+# Use parameters (compile time) so stage names can embed them
 parameters:
-  - name: activateVersion            # KB / BB
-    type: string
-    default: KB
-    values: [KB, BB]
-
-  - name: SourceRepo                 # UNC; no trailing backslash
-    type: string
-    default: '\\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate'
-
-  - name: productVersion             # e.g., 4.0.13K
+  - name: revisionVersion         # e.g. 4.0.13K
     type: string
     default: '4.0.13K'
-
+  - name: releaseTo               # KB or BB
+    type: string
+    default: 'KB'
+    values: [ 'KB', 'BB' ]
   - name: releaseRing
     type: string
     default: 'PROD'
 
-  - name: msiArchitecture
-    type: string
-    default: 'x86'
-    values: [x86, x64]
-
-  - name: msiFileName               # leave blank to pick latest
-    type: string
-    default: ''
-
-  - name: mecmSiteServer
+  - name: MECM_ProdSiteServer
     type: string
     default: 'CM01.corp.bank.nz'
-  - name: mecmSiteCode
+  - name: MECM_ProdSiteCode
     type: string
     default: 'ABC'
 
-  - name: configMgrRepoRoot
+  - name: MECM_ProdLimitingCollectionName
+    type: string
+    default: 'All Systems'
+  - name: MECM_PVTCollection
+    type: string
+    default: 'Root\\Applications\\Workstation\\Client Application Collections\\Activate KB/BB PVT'
+  - name: MECM_ScheduledInstallCollection
+    type: string
+    default: 'Root\\Applications\\Workstation\\Client Application Collections\\Activate KB'
+
+  - name: MECM_ScheduledCacheTime      # 'yyyy-MM-dd HH:mm' (client local)
+    type: string
+    default: '2025-09-15 19:00'
+  - name: MECM_ScheduledInstallTime    # 'yyyy-MM-dd HH:mm' (client local)
+    type: string
+    default: '2025-09-16 04:00'
+
+  - name: ConfigMgrRepoRoot
     type: string
     default: '\\fileserver\configmgr\Repo\Applications\Workstation'
-  - name: iconRepo
+  - name: IconRepo
     type: string
     default: '\\fileserver\configmgr\Repo\Icons'
-  - name: iconFileName
+  - name: IconFileName
     type: string
     default: 'activate.ico'
-
-  - name: dpGroupCorp
+  - name: DPGroupCorp
     type: string
     default: 'Kiwibank All CORPNET DP'
-  - name: dpGroupVpn
+  - name: DPGroupVpn
     type: string
     default: 'Kiwibank All VPN DP'
 
-  - name: collPvt
+  - name: SourceRepo                 # UNC root with MSIs (no trailing '\')
     type: string
-    default: 'Root\\Applications\\Workstation\\Client Application Collections\\Activate KB/BB PVT'
-  - name: collActivateKB
+    default: '\\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate'
+  - name: PreferArch                 # any | x86 | x64 (optional filter)
     type: string
-    default: 'Root\\Applications\\Workstation\\Client Application Collections\\Activate KB'
-  - name: collAllUsers
+    default: 'any'
+    values: [ 'any','x86','x64' ]
+  - name: MsiPattern                 # regex-like name filter
     type: string
-    default: 'All Users'
-
-  # Required rollout schedule (client local time)
-  - name: activateKB_AvailableDate
-    type: string
-    default: '2025-09-15'
-  - name: activateKB_AvailableTime
-    type: string
-    default: '19:00'
-  - name: activateKB_DeadlineDate
-    type: string
-    default: '2025-09-16'
-  - name: activateKB_DeadlineTime
-    type: string
-    default: '04:00'
-
-  # All Users (Available) optional schedule
-  - name: allUsers_ScheduleAfterServerDeploy
-    type: boolean
-    default: false
-  - name: allUsers_AvailableDate
-    type: string
-    default: '2025-09-15'
-  - name: allUsers_AvailableTime
-    type: string
-    default: '20:00'
-
-  - name: previousAppName            # for n-1 cleanup
+    default: 'Activate.*\.msi'
+  - name: MsiFileName                # optional exact file name
     type: string
     default: ''
 
 variables:
   vmImage: 'windows-2022'
-  productBaseName: ${{ if eq(parameters.activateVersion, 'KB') }}:
-    - 'Activate KB'
-    ${{ if ne(parameters.activateVersion, 'KB') }}:
-    - 'Activate BB'
-  appName: ${{ format('{0} - {1} ({2})', variables.productBaseName, parameters.productVersion, parameters.releaseRing) }}
 
 stages:
-- template: .pipelines/templates/01-UploadMSI.yml
-  parameters:
-    vmImage: $(vmImage)
-    SourceRepo: ${{ parameters.SourceRepo }}
-    msiArchitecture: ${{ parameters.msiArchitecture }}
-    msiFileName: ${{ parameters.msiFileName }}
+# 0) Bootstrap: copy PS scripts to a predictable folder for templates (scriptsFolder)
+- stage: Bootstrap_Scripts
+  displayName: 'Bootstrap scripts'
+  jobs:
+  - job: Copy
+    pool: { vmImage: $(vmImage) }
+    steps:
+    - powershell: |
+        New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
+        Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
+      displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
 
-- template: .pipelines/templates/02-CreateApp.yml
+# 1) Upload MSI (UNC → artifact 'drop')
+- template: templates/UploadMSITemplate.yml
   parameters:
-    vmImage: $(vmImage)
-    mecmSiteServer: ${{ parameters.mecmSiteServer }}
-    mecmSiteCode: ${{ parameters.mecmSiteCode }}
-    configMgrRepoRoot: ${{ parameters.configMgrRepoRoot }}
-    productBaseName: $(productBaseName)
-    productVersion: ${{ parameters.productVersion }}
+    scriptsFolder: $(Pipeline.Workspace)\Cache
+    sourceRepo: ${{ parameters.SourceRepo }}
+    msiFileName: ${{ parameters.MsiFileName }}
+    preferArch: ${{ parameters.PreferArch }}
+    msiPattern: ${{ parameters.MsiPattern }}
+    artifactName: 'drop'
+
+# 2) Create/brand/distribute the application
+- template: templates/MECMCreateApplicationTemplate.yml
+  parameters:
+    dryRun: False
+    revisionVersion: ${{ parameters.revisionVersion }}
+    releaseTo: ${{ parameters.releaseTo }}
     releaseRing: ${{ parameters.releaseRing }}
+    scriptsFolder: $(Pipeline.Workspace)\Cache
+    mecmSiteServer: ${{ parameters.MECM_ProdSiteServer }}
+    mecmSiteCode: ${{ parameters.MECM_ProdSiteCode }}
+    applicationFolderPath: ${{ parameters.ConfigMgrRepoRoot }}
+    iconRepo: ${{ parameters.IconRepo }}
+    iconFileName: ${{ parameters.IconFileName }}
+    contentDistributionPoints: '${{ parameters.DPGroupCorp }};${{ parameters.DPGroupVpn }}'
 
-- template: .pipelines/templates/03-BrandAndDistribute.yml
+# 3) Make application Available to PVT users
+- template: templates/MECMAvailableDeploymentTemplate.yml
   parameters:
-    vmImage: $(vmImage)
-    mecmSiteServer: ${{ parameters.mecmSiteServer }}
-    mecmSiteCode: ${{ parameters.mecmSiteCode }}
-    appName: $(appName)
-    iconRepo: ${{ parameters.iconRepo }}
-    iconFileName: ${{ parameters.iconFileName }}
-    dpGroupCorp: ${{ parameters.dpGroupCorp }}
-    dpGroupVpn: ${{ parameters.dpGroupVpn }}
+    dryRun: False
+    taskGroupName: 'PVT${{ parameters.releaseTo }}'
+    revisionVersion: ${{ parameters.revisionVersion }}
+    releaseTo: ${{ parameters.releaseTo }}
+    releaseRing: ${{ parameters.releaseRing }}
+    scriptsFolder: $(Pipeline.Workspace)\Cache
+    mecmSiteServer: ${{ parameters.MECM_ProdSiteServer }}
+    mecmSiteCode: ${{ parameters.MECM_ProdSiteCode }}
+    limitingCollectionName: ${{ parameters.MECM_ProdLimitingCollectionName }}
+    userCollectionName: ${{ parameters.MECM_PVTCollection }}
+    scheduledInstallTime: ''
+    refreshDeviceCollection: false
 
-- template: .pipelines/templates/04-DeployPVT.yml
+# 4) Make application Required for scheduled device collection
+- template: templates/MECMRequiredDeploymentTemplate.yml
   parameters:
-    vmImage: $(vmImage)
-    mecmSiteServer: ${{ parameters.mecmSiteServer }}
-    mecmSiteCode: ${{ parameters.mecmSiteCode }}
-    appName: $(appName)
-    collPvt: ${{ parameters.collPvt }}
-
-- template: .pipelines/templates/05-DeployActivateKB.yml
-  parameters:
-    vmImage: $(vmImage)
-    mecmSiteServer: ${{ parameters.mecmSiteServer }}
-    mecmSiteCode: ${{ parameters.mecmSiteCode }}
-    appName: $(appName)
-    collActivateKB: ${{ parameters.collActivateKB }}
-    available: ${{ format('{0} {1}', parameters.activateKB_AvailableDate, parameters.activateKB_AvailableTime) }}
-    deadline:  ${{ format('{0} {1}', parameters.activateKB_DeadlineDate,  parameters.activateKB_DeadlineTime) }}
-
-- template: .pipelines/templates/06-DeployAllUsers.yml
-  parameters:
-    vmImage: $(vmImage)
-    mecmSiteServer: ${{ parameters.mecmSiteServer }}
-    mecmSiteCode: ${{ parameters.mecmSiteCode }}
-    appName: $(appName)
-    collAllUsers: ${{ parameters.collAllUsers }}
-    scheduleAfter: ${{ parameters.allUsers_ScheduleAfterServerDeploy }}
-    available: ${{ format('{0} {1}', parameters.allUsers_AvailableDate, parameters.allUsers_AvailableTime) }}
-
-- template: .pipelines/templates/07-Cleanup.yml
-  parameters:
-    vmImage: $(vmImage)
-    mecmSiteServer: ${{ parameters.mecmSiteServer }}
-    mecmSiteCode: ${{ parameters.mecmSiteCode }}
-    previousAppName: ${{ parameters.previousAppName }}
+    dryRun: False
+    taskGroupName: 'Scheduled${{ parameters.releaseTo }}'
+    dependsOnStageName: 'Deploy_Available_PVT${{ parameters.releaseTo }}'
+    revisionVersion: ${{ parameters.revisionVersion }}
+    releaseTo: ${{ parameters.releaseTo }}
+    releaseRing: ${{ parameters.releaseRing }}
+    scriptsFolder: $(Pipeline.Workspace)\Cache
+    mecmSiteServer: ${{ parameters.MECM_ProdSiteServer }}
+    mecmSiteCode: ${{ parameters.MECM_ProdSiteCode }}
+    limitingCollectionName: ${{ parameters.MECM_ProdLimitingCollectionName }}
+    userCollectionName: ${{ parameters.MECM_ScheduledInstallCollection }}
+    scheduledCacheTime: ${{ parameters.MECM_ScheduledCacheTime }}
+    scheduledInstallTime: ${{ parameters.MECM_ScheduledInstallTime }}
