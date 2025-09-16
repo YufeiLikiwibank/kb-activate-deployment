@@ -1,0 +1,38 @@
+parameters:
+  dryRun: False
+  taskGroupName: ''
+  dependsOnStageName: ''       # pass the Available stage name from orchestrator
+  revisionVersion: ''
+  releaseTo: ''                # KB or BB
+  releaseRing: 'PROD'
+  scriptsFolder: ''
+  mecmSiteServer: ''
+  mecmSiteCode: ''
+  limitingCollectionName: ''   # kept for parity
+  userCollectionName: ''       # scheduled device collection
+  scheduledCacheTime: ''       # 'yyyy-MM-dd HH:mm'
+  scheduledInstallTime: ''     # 'yyyy-MM-dd HH:mm'
+
+stages:
+- stage: Deploy_Required_${{ parameters.taskGroupName }}
+  displayName: 'Required (Scheduled) → ${{ parameters.taskGroupName }}'
+  dependsOn: ${{ parameters.dependsOnStageName }}
+  jobs:
+  - job: DeployRequired
+    pool: { vmImage: 'windows-2022' }
+    steps:
+    - task: PowerShell@2
+      displayName: 'MECM Required deployment (scheduled)'
+      inputs:
+        targetType: filePath
+        filePath: ${{ parameters.scriptsFolder }}\MECMDeployRequired.ps1
+        arguments: >
+          -DryRun:(${ if eq(parameters.dryRun, True) }$true${ else }$false${ end })
+          -ReleaseTo '${{ parameters.releaseTo }}'
+          -SoftwareVersion '${{ parameters.revisionVersion }}'
+          -ReleaseRing '${{ parameters.releaseRing }}'
+          -SCCMSiteServer '${{ parameters.mecmSiteServer }}'
+          -SCCMSiteCode '${{ parameters.mecmSiteCode }}'
+          -TargetCollection '${{ parameters.userCollectionName }}'
+          -AvailableDateTime '${{ parameters.scheduledCacheTime }}'
+          -DeadlineDateTime '${{ parameters.scheduledInstallTime }}'
