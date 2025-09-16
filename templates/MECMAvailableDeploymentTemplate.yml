@@ -55,4 +55,4 @@ steps:
     inputs:
       targetType: filePath
       filePath: ${{parameters.scriptsFolder}}\DeployClientToAvailableCollectionMECM.ps1
-      arguments: '-packageName InTouch-Client-${{parameters.releaseTo}}-${{parameters.revisionVersion}} -releaseTo ${{parameters.releaseTo}} -SCCMsiteServer ${{parameters.mecmSiteServer}} -deploymentCollection "${{parameters.userCollectionName}}" -scheduledInstallTime "${{parameters.scheduledInstallTime}}" -forceFutureDate "${{parameters.forceFutureDate}}"'
+      arguments: '-packageName Activate-${{parameters.releaseTo}}-${{parameters.revisionVersion}} -releaseTo ${{parameters.releaseTo}} -SCCMsiteServer ${{parameters.mecmSiteServer}} -deploymentCollection "${{parameters.userCollectionName}}" -scheduledInstallTime "${{parameters.scheduledInstallTime}}" -forceFutureDate "${{parameters.forceFutureDate}}"'
