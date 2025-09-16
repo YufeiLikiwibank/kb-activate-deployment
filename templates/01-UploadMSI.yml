@@ -1,1 +1,37 @@
 
+parameters:
+  vmImage: ''
+  SourceRepo: ''
+  msiArchitecture: 'x86'
+  msiFileName: ''
+
+stages:
+- stage: Upload_MSI
+  displayName: 'Upload MSI'
+  jobs:
+  - job: CopyPublish
+    pool: { vmImage: ${{ parameters.vmImage }} }
+    steps:
+    - powershell: |
+        $ErrorActionPreference = 'Stop'
+        $src = '${{ parameters.SourceRepo }}'
+        if ([string]::IsNullOrWhiteSpace($src)) { throw "SourceRepo is empty." }
+        $pattern = if ('${{ parameters.msiArchitecture }}' -eq 'x64') { 'x64|amd64' } else { 'x86|win32' }
+        $msiName = '${{ parameters.msiFileName }}'
+
+        if ([string]::IsNullOrWhiteSpace($msiName)) {
+          $cand = Get-ChildItem -Path $src -Filter *.msi -Recurse |
+            Where-Object { $_.Name -match 'Activate' -and $_.Name -match $pattern } |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $cand) { throw "No MSI found in $src for pattern $pattern" }
+          $msi = $cand
+        } else {
+          $msi = Get-Item (Join-Path $src $msiName)
+        }
+
+        New-Item -ItemType Directory -Path "$(Build.SourcesDirectory)\drop" -Force | Out-Null
+        Copy-Item $msi.FullName -Destination "$(Build.SourcesDirectory)\drop" -Force
+      displayName: 'Copy MSI from UNC'
+    - publish: '$(Build.SourcesDirectory)/drop'
+      artifact: drop
+      displayName: 'Publish MSI artifact'
