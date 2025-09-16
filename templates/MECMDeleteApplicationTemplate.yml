@@ -1,0 +1,27 @@
+parameters:
+  - name: dryRun # Only allows validation and the gates to run
+    type: boolean
+    default: true
+
+  - name: taskGroupName # Unique names for jobs
+    type: string
+
+  - name: releaseTo
+    type: string
+
+  - name: scriptsFolder # Expected to be checked out prior to this template
+    type: string
+
+  - name: mecmSiteServer 
+    type: string
+
+steps:
+  #Delete existing Application and its associated deployments
+  - task: powershell@2
+    condition: eq(${{parameters.dryRun}}, False)
+    name: deleteExistingAppFor${{parameters.taskGroupName}}
+    displayName: Delete Existing MECM Application and associated deployments
+    inputs:
+      targetType: filePath
+      filePath: ${{parameters.scriptsFolder}}\DeleteExistingApplicationDeploymentsInMECM.ps1
+      arguments: "-packageName InTouch-Client-${{parameters.releaseTo}} -MECMsiteServer ${{parameters.mecmSiteServer}}"
