@@ -1,35 +1,58 @@
 parameters:
-  dryRun: False
-  taskGroupName: ''
-  revisionVersion: ''
-  releaseTo: ''             # KB or BB
-  releaseRing: 'PROD'
-  scriptsFolder: ''
-  mecmSiteServer: ''
-  mecmSiteCode: ''
-  limitingCollectionName: ''  # kept for parity
-  userCollectionName: ''      # PVT user collection
-  scheduledInstallTime: ''    # not used for Available
-  refreshDeviceCollection: false
+  - name: dryRun # Only allows validation and the gates to run
+    type: boolean
+    default: true
 
-stages:
-- stage: Deploy_Available_${{ parameters.taskGroupName }}
-  displayName: 'Available → ${{ parameters.taskGroupName }}'
-  dependsOn: Create_MECM_App
-  jobs:
-  - job: DeployAvailable
-    pool: { vmImage: 'windows-2022' }
-    steps:
-    - task: PowerShell@2
-      displayName: 'MECM Available deployment (PVT users)'
-      inputs:
-        targetType: filePath
-        filePath: ${{ parameters.scriptsFolder }}\MECMDeployAvailable.ps1
-        arguments: >
-          -DryRun:(${ if eq(parameters.dryRun, True) }$true${ else }$false${ end })
-          -ReleaseTo '${{ parameters.releaseTo }}'
-          -SoftwareVersion '${{ parameters.revisionVersion }}'
-          -ReleaseRing '${{ parameters.releaseRing }}'
-          -SCCMSiteServer '${{ parameters.mecmSiteServer }}'
-          -SCCMSiteCode '${{ parameters.mecmSiteCode }}'
-          -TargetCollection '${{ parameters.userCollectionName }}'
+  - name: taskGroupName # Unique name for jobs
+    type: string
+
+  - name: revisionVersion
+    type: string
+
+  - name: releaseTo 
+    type: string
+
+  - name: scriptsFolder # Expected to be checked out prior to this template
+    type: string
+
+  - name: mecmSiteServer 
+    type: string
+
+  - name: limitingCollectionName 
+    type: string
+
+  - name: userCollectionName 
+    type: string
+
+  - name: refreshDeviceCollection 
+    type: boolean
+    default: true
+
+  - name: scheduledInstallTime 
+    type: string
+    default: Now
+
+  - name: forceFutureDate
+    type: boolean
+    default: false
+
+steps:
+  #Create  device collection from device list
+  - task: powershell@2
+    condition: eq(${{parameters.dryRun}}, False)
+    name: create${{parameters.taskGroupName}}Collection
+    displayName: Create ${{parameters.taskGroupName}} Collection of Devices
+    inputs:
+      targetType: filePath
+      filePath: ${{parameters.scriptsFolder}}\CreateEnvironmentCollectionInMECM.ps1
+      arguments: '-SCCMsiteServer ${{parameters.mecmSiteServer}} -releaseTo ${{parameters.releaseTo}} -limitingCollectionName "${{parameters.limitingCollectionName}}" -refreshDeviceCollection ${{parameters.refreshDeviceCollection}} -userCollectionName "${{parameters.userCollectionName}}"'
+
+  #Run MECM deployment to Software Centre (Offertype=2 - AVAILABLE)
+  - task: powershell@2
+    condition: and(succeeded(), eq(${{parameters.dryRun}}, False))
+    name: makeAvailableTo${{parameters.taskGroupName}}Collection
+    displayName: Make Available to ${{parameters.taskGroupName}} Collection
+    inputs:
+      targetType: filePath
+      filePath: ${{parameters.scriptsFolder}}\DeployClientToAvailableCollectionMECM.ps1
+      arguments: '-packageName InTouch-Client-${{parameters.releaseTo}}-${{parameters.revisionVersion}} -releaseTo ${{parameters.releaseTo}} -SCCMsiteServer ${{parameters.mecmSiteServer}} -deploymentCollection "${{parameters.userCollectionName}}" -scheduledInstallTime "${{parameters.scheduledInstallTime}}" -forceFutureDate "${{parameters.forceFutureDate}}"'
