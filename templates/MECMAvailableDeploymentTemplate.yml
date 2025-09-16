@@ -1,0 +1,35 @@
+parameters:
+  dryRun: False
+  taskGroupName: ''
+  revisionVersion: ''
+  releaseTo: ''             # KB or BB
+  releaseRing: 'PROD'
+  scriptsFolder: ''
+  mecmSiteServer: ''
+  mecmSiteCode: ''
+  limitingCollectionName: ''  # kept for parity
+  userCollectionName: ''      # PVT user collection
+  scheduledInstallTime: ''    # not used for Available
+  refreshDeviceCollection: false
+
+stages:
+- stage: Deploy_Available_${{ parameters.taskGroupName }}
+  displayName: 'Available → ${{ parameters.taskGroupName }}'
+  dependsOn: Create_MECM_App
+  jobs:
+  - job: DeployAvailable
+    pool: { vmImage: 'windows-2022' }
+    steps:
+    - task: PowerShell@2
+      displayName: 'MECM Available deployment (PVT users)'
+      inputs:
+        targetType: filePath
+        filePath: ${{ parameters.scriptsFolder }}\MECMDeployAvailable.ps1
+        arguments: >
+          -DryRun:(${ if eq(parameters.dryRun, True) }$true${ else }$false${ end })
+          -ReleaseTo '${{ parameters.releaseTo }}'
+          -SoftwareVersion '${{ parameters.revisionVersion }}'
+          -ReleaseRing '${{ parameters.releaseRing }}'
+          -SCCMSiteServer '${{ parameters.mecmSiteServer }}'
+          -SCCMSiteCode '${{ parameters.mecmSiteCode }}'
+          -TargetCollection '${{ parameters.userCollectionName }}'
