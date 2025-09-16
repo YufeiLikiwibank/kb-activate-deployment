@@ -1,1 +1,33 @@
+parameters:
+- name: activateVersion
+  displayName: Select Activate Version
+  type: string
+  default: KB
+  values:
+    - KB
+    - BB
 
+- name: SourceRepo
+  displayName: Enter full UNC FQDN Path of the x64/86 MSI (DO NOT ADD trailing "\" eg. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate)
+  type: string
+  default:
+
+stages:
+# Upload MSI
+  - template: Template-PublishArtifact.yml
+    parameters:
+      stageName: 'Upload_MSI'
+      stageDisplayName: 'Upload MSI'
+      SourceRepo: ${{parameters.SourceRepo}}
+      envName: 'PRD-WLG'
+      condition: succeeded()
+
+# Release to Environment
+  - template: Template-Activate-DeployandSeal.yml
+    parameters:
+      stageName: 'Citrix_Activate_DeployandSeal'
+      stageDisplayName: 'Citrix Activate Deploy and Seal'
+      activateVersion: ${{parameters.activateVersion}}   
+      appEnvironment: ${{parameters.appEnvironment}}
+      envName: ${{variables.envName}}
+      condition: succeeded()
