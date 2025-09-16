@@ -1,65 +1,164 @@
-parameters:
-- name: activateVersion
-  displayName: Select Activate Version
-  type: string
-  default: KB
-  values:
-    - KB
-    - BB
+trigger: none
+pr: none
 
-- name: SourceRepo
-  displayName: Enter full UNC FQDN Path of the x64/86 MSI (DO NOT ADD trailing "\" eg. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate)
-  type: string
-  default:
+parameters:
+  - name: activateVersion            # KB / BB
+    type: string
+    default: KB
+    values: [KB, BB]
+
+  - name: SourceRepo                 # UNC; no trailing backslash
+    type: string
+    default: '\\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate'
+
+  - name: productVersion             # e.g., 4.0.13K
+    type: string
+    default: '4.0.13K'
+
+  - name: releaseRing
+    type: string
+    default: 'PROD'
+
+  - name: msiArchitecture
+    type: string
+    default: 'x86'
+    values: [x86, x64]
+
+  - name: msiFileName               # leave blank to pick latest
+    type: string
+    default: ''
+
+  - name: mecmSiteServer
+    type: string
+    default: 'CM01.corp.bank.nz'
+  - name: mecmSiteCode
+    type: string
+    default: 'ABC'
+
+  - name: configMgrRepoRoot
+    type: string
+    default: '\\fileserver\configmgr\Repo\Applications\Workstation'
+  - name: iconRepo
+    type: string
+    default: '\\fileserver\configmgr\Repo\Icons'
+  - name: iconFileName
+    type: string
+    default: 'activate.ico'
+
+  - name: dpGroupCorp
+    type: string
+    default: 'Kiwibank All CORPNET DP'
+  - name: dpGroupVpn
+    type: string
+    default: 'Kiwibank All VPN DP'
+
+  - name: collPvt
+    type: string
+    default: 'Root\\Applications\\Workstation\\Client Application Collections\\Activate KB/BB PVT'
+  - name: collActivateKB
+    type: string
+    default: 'Root\\Applications\\Workstation\\Client Application Collections\\Activate KB'
+  - name: collAllUsers
+    type: string
+    default: 'All Users'
+
+  # Required rollout schedule (client local time)
+  - name: activateKB_AvailableDate
+    type: string
+    default: '2025-09-15'
+  - name: activateKB_AvailableTime
+    type: string
+    default: '19:00'
+  - name: activateKB_DeadlineDate
+    type: string
+    default: '2025-09-16'
+  - name: activateKB_DeadlineTime
+    type: string
+    default: '04:00'
+
+  # All Users (Available) optional schedule
+  - name: allUsers_ScheduleAfterServerDeploy
+    type: boolean
+    default: false
+  - name: allUsers_AvailableDate
+    type: string
+    default: '2025-09-15'
+  - name: allUsers_AvailableTime
+    type: string
+    default: '20:00'
+
+  - name: previousAppName            # for n-1 cleanup
+    type: string
+    default: ''
+
+variables:
+  vmImage: 'windows-2022'
+  productBaseName: ${{ if eq(parameters.activateVersion, 'KB') }}:
+    - 'Activate KB'
+    ${{ if ne(parameters.activateVersion, 'KB') }}:
+    - 'Activate BB'
+  appName: ${{ format('{0} - {1} ({2})', variables.productBaseName, parameters.productVersion, parameters.releaseRing) }}
 
 stages:
-# Upload MSI
-  - template: Template-PublishArtifact.yml
-    parameters:
-      stageName: 'Upload_MSI'
-      stageDisplayName: 'Upload MSI'
-      SourceRepo: ${{parameters.SourceRepo}}
-      envName: 'PRD-WLG'
-      condition: succeeded()
-  
-#Create Application to deploy to MECM
-  - task: powershell@2
-    condition: eq(${{parameters.dryRun}}, False)
-    name: createApplicationFor${{parameters.taskGroupName}}
-    displayName: Create MECM Application to Deploy
-    inputs:
-      targetType: filePath
-      filePath: ${{parameters.scriptsFolder}}\CreateMECMApplicationToDeploy.ps1
-      arguments: '-packageName InTouch-Client-${{parameters.releaseTo}}-${{parameters.revisionVersion}} -releaseTo ${{parameters.releaseTo}} -softwareVersion ${{parameters.revisionVersion}} -SCCMsiteServer ${{parameters.mecmSiteServer}} -applicationFolderPath "${{parameters.applicationFolderPath}}" -msiFolderLocation "${{parameters.msiFolderLocation}}" -contentDistributionPoints "${{parameters.contentDistributionPoints}}"'
-      
-# Release to PVT Users
-  - template: ReleaseEnvironmentTemplate.yml
-      parameters:
-      stageName: 'Citrix_Activate_DeployandSeal'
-      stageDisplayName: 'Citrix Activate Deploy and Seal'
-      activateVersion: ${{parameters.activateVersion}}   
-      appEnvironment: ${{parameters.appEnvironment}}
-      envName: ${{variables.envName}}
-      condition: succeeded()
+- template: .pipelines/templates/01-UploadMSI.yml
+  parameters:
+    vmImage: $(vmImage)
+    SourceRepo: ${{ parameters.SourceRepo }}
+    msiArchitecture: ${{ parameters.msiArchitecture }}
+    msiFileName: ${{ parameters.msiFileName }}
 
-  # Release to  Activate KB
-   - template: ReleaseEnvironmentTemplate.yml
-      parameters:
-      stageName: 'Citrix_Activate_DeployandSeal'
-      stageDisplayName: 'Citrix Activate Deploy and Seal'
-      activateVersion: ${{parameters.activateVersion}}   
-      appEnvironment: ${{parameters.appEnvironment}}
-      envName: ${{variables.envName}}
-      condition: succeeded()
+- template: .pipelines/templates/02-CreateApp.yml
+  parameters:
+    vmImage: $(vmImage)
+    mecmSiteServer: ${{ parameters.mecmSiteServer }}
+    mecmSiteCode: ${{ parameters.mecmSiteCode }}
+    configMgrRepoRoot: ${{ parameters.configMgrRepoRoot }}
+    productBaseName: $(productBaseName)
+    productVersion: ${{ parameters.productVersion }}
+    releaseRing: ${{ parameters.releaseRing }}
 
- # Release to  All Users
-   - template: ReleaseEnvironmentTemplate.yml
-      parameters:
-      stageName: 'Citrix_Activate_DeployandSeal'
-      stageDisplayName: 'Citrix Activate Deploy and Seal'
-      activateVersion: ${{parameters.activateVersion}}   
-      appEnvironment: ${{parameters.appEnvironment}}
-      envName: ${{variables.envName}}
-      condition: succeeded()
-      
-  #Clean Up Previous Versions
+- template: .pipelines/templates/03-BrandAndDistribute.yml
+  parameters:
+    vmImage: $(vmImage)
+    mecmSiteServer: ${{ parameters.mecmSiteServer }}
+    mecmSiteCode: ${{ parameters.mecmSiteCode }}
+    appName: $(appName)
+    iconRepo: ${{ parameters.iconRepo }}
+    iconFileName: ${{ parameters.iconFileName }}
+    dpGroupCorp: ${{ parameters.dpGroupCorp }}
+    dpGroupVpn: ${{ parameters.dpGroupVpn }}
+
+- template: .pipelines/templates/04-DeployPVT.yml
+  parameters:
+    vmImage: $(vmImage)
+    mecmSiteServer: ${{ parameters.mecmSiteServer }}
+    mecmSiteCode: ${{ parameters.mecmSiteCode }}
+    appName: $(appName)
+    collPvt: ${{ parameters.collPvt }}
+
+- template: .pipelines/templates/05-DeployActivateKB.yml
+  parameters:
+    vmImage: $(vmImage)
+    mecmSiteServer: ${{ parameters.mecmSiteServer }}
+    mecmSiteCode: ${{ parameters.mecmSiteCode }}
+    appName: $(appName)
+    collActivateKB: ${{ parameters.collActivateKB }}
+    available: ${{ format('{0} {1}', parameters.activateKB_AvailableDate, parameters.activateKB_AvailableTime) }}
+    deadline:  ${{ format('{0} {1}', parameters.activateKB_DeadlineDate,  parameters.activateKB_DeadlineTime) }}
+
+- template: .pipelines/templates/06-DeployAllUsers.yml
+  parameters:
+    vmImage: $(vmImage)
+    mecmSiteServer: ${{ parameters.mecmSiteServer }}
+    mecmSiteCode: ${{ parameters.mecmSiteCode }}
+    appName: $(appName)
+    collAllUsers: ${{ parameters.collAllUsers }}
+    scheduleAfter: ${{ parameters.allUsers_ScheduleAfterServerDeploy }}
+    available: ${{ format('{0} {1}', parameters.allUsers_AvailableDate, parameters.allUsers_AvailableTime) }}
+
+- template: .pipelines/templates/07-Cleanup.yml
+  parameters:
+    vmImage: $(vmImage)
+    mecmSiteServer: ${{ parameters.mecmSiteServer }}
+    mecmSiteCode: ${{ parameters.mecmSiteCode }}
+    previousAppName: ${{ parameters.previousAppName }}
