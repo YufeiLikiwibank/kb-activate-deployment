@@ -3,10 +3,9 @@ pr: none
 
 # Use parameters (compile time) so stage names can embed them
 parameters:
-  - name: revisionVersion         # e.g. 4.0.13K
+  - name: revisionVersion         
     type: string
-    default: '4.0.13K'
-  - name: releaseTo               # KB or BB
+  - name: releaseTo             
     type: string
     default: 'KB'
     values: [ 'KB', 'BB' ]
