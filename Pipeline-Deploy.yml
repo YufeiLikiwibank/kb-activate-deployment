@@ -8,6 +8,11 @@ parameters:
     type: string
     default: 'KB'
     values: ['KB','BB']
+  - name: SourceRepo
+  displayName: Enter full UNC FQDN Path of the x64 MSI (DO NOT ADD trailing "\" eg. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate)
+  type: string
+  default:
+
 
 variables:
   # Imports from Library → Activate-SIT
@@ -52,6 +57,14 @@ stages:
               New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
               Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
             displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
+    
+    - template: Template-PublishArtifact.yml
+    parameters:
+      stageName: 'Upload_MSI'
+      stageDisplayName: 'Upload MSI'
+      SourceRepo: ${{parameters.SourceRepo}}
+      envName: 'PRD-WLG'
+      condition: succeeded()
 
   # 2) Create/brand/distribute the application (SIT)
   - template: ../templates/MECMApplicationTemplate.yml
