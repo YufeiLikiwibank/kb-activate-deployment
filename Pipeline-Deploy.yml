@@ -4,43 +4,46 @@ pr: none
 # SIT-only pipeline using Activate-SIT library values
 
 parameters:
-  - name: revisionVersion
-    type: string
-
   - name: releaseTo
     type: string
     default: 'KB'
     values: ['KB','BB']
 
-  # Folder on the agent containing your product sources (for sourceFolder below)
-  - name: workspace
-    type: string
-    default: '$(Build.SourcesDirectory)'
-
 variables:
-  # Imports from Library → Activate-SIT:
-  # MECM_ApplicationFolderpath = Application\Workstation\Pipeline
-  # MECM_MsiFolderLocation     = \\kbcfgmgresource\apps$\Workstation\Pipeline
-  # MECM_PreProdSiteServer     = kbstcfgmgr005.corp.bank.sit.kiwibank.internal
-  # MECM_PVTCollection         = Activate KB/BB PVT SIT
-  # MECM_ScheduledCacheTime    = Now
-  # MECM_ScheduledInstallTime  = Now
-  # MECM_SITContentDistributionPoints = Kiwibank All Distribution Points
-  # MECM_SITLimitingCollectionName    = All Desktop and Server Clients
-  # MECM_SITSoftwareCentreCollection  = All Users
+  # Imports from Library → Activate-SIT
+  # MECM_ApplicationFolderpath, MECM_MsiFolderLocation, MECM_PreProdSiteServer,
+  # MECM_PVTCollection, MECM_ScheduledCacheTime, MECM_ScheduledInstallTime,
+  # MECM_SITContentDistributionPoints, MECM_SITLimitingCollectionName, MECM_SITSoftwareCentreCollection
   - group: Activate-SIT
-
-  # Map parameter to classic variable expected by templates
-  - name: revisionVersion
-    value: ${{ parameters.revisionVersion }}
 
   - name: vmImage
     value: 'windows-2022'
 
 stages:
-  # 0) Bootstrap: copy PS scripts to a predictable folder for templates (scriptsFolder)
+  # 0) Detect MSI ProductVersion -> revisionVersion
+  - stage: Detect_Version
+    displayName: 'Detect MSI ProductVersion'
+    jobs:
+      - job: SetVersion
+        displayName: 'Read version from MSI'
+        pool: { vmImage: $(vmImage) }
+        steps:
+          - task: PowerShell@2
+            name: detect
+            displayName: 'Detect ProductVersion from MSI'
+            inputs:
+              filePath: 'scripts/Detect-MsiVersion.ps1'
+              arguments: >
+                -Folder "$(MECM_MsiFolderLocation)"
+                -Filter "Activate*.msi"
+                -VariableName "revisionVersion"
+                -SetBuildNumber
+              pwsh: false   # use Windows PowerShell for WindowsInstaller COM
+
+  # 1) Bootstrap: copy PS scripts for templates
   - stage: Bootstrap_Scripts
     displayName: 'Bootstrap scripts'
+    dependsOn: Detect_Version
     jobs:
       - job: Copy
         pool: { vmImage: $(vmImage) }
@@ -50,44 +53,44 @@ stages:
               Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
             displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
 
-  # 1) Create/brand/distribute the application (SIT)
+  # 2) Create/brand/distribute the application (SIT)
   - template: ../templates/MECMApplicationTemplate.yml
     parameters:
       dryRun: False
-      taskGroupName: "Scheduled${{parameters.releaseTo}}"
-      revisionVersion: $(revisionVersion)
-      releaseTo: ${{parameters.releaseTo}}
-      sourceFolder: ${{ parameters.workspace }}\InTouch Client
+      taskGroupName: "Scheduled${{ parameters.releaseTo }}"
+      revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
+      releaseTo: ${{ parameters.releaseTo }}
+      sourceFolder: '$(Build.SourcesDirectory)\InTouch Client'
       scriptsFolder: $(Pipeline.Workspace)\Cache
       mecmSiteServer: $(MECM_PreProdSiteServer)
       msiFolderLocation: $(MECM_MsiFolderLocation)
       applicationFolderPath: $(MECM_ApplicationFolderpath)
       contentDistributionPoints: $(MECM_SITContentDistributionPoints)
 
-  # 2) Make application Available to PVT users (SIT Software Center visibility for PVT ring)
+  # 3) Make application Available to PVT users (SIT)
   - template: ../templates/MECMAvailableDeploymentTemplate.yml
     parameters:
       dryRun: False
-      taskGroupName: "PVT${{parameters.releaseTo}}"
-      revisionVersion: $(revisionVersion)
-      releaseTo: ${{parameters.releaseTo}}
+      taskGroupName: "PVT${{ parameters.releaseTo }}"
+      revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
+      releaseTo: ${{ parameters.releaseTo }}
       scriptsFolder: $(Pipeline.Workspace)\Cache
       mecmSiteServer: $(MECM_PreProdSiteServer)
       limitingCollectionName: $(MECM_SITLimitingCollectionName)
-      userCollectionName: $(MECM_PVTCollection)            # Activate KB/BB PVT SIT
-      scheduledInstallTime: $(MECM_ScheduledCacheTime)     # "Now" per Library
-      refreshDeviceCollection: false                       # user collection → no device refresh
+      userCollectionName: $(MECM_PVTCollection)
+      scheduledInstallTime: $(MECM_ScheduledCacheTime)   # "Now" (from Library)
+      refreshDeviceCollection: false
 
-  # 3) Make application Required for SIT groups (scheduled install)
+  # 4) Make application Required for SIT groups (scheduled install)
   - template: ../templates/MECMRequiredDeploymentTemplate.yml
     parameters:
       dryRun: False
-      taskGroupName: "Scheduled${{parameters.releaseTo}}"
-      revisionVersion: $(revisionVersion)
-      releaseTo: ${{parameters.releaseTo}}
+      taskGroupName: "Scheduled${{ parameters.releaseTo }}"
+      revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
+      releaseTo: ${{ parameters.releaseTo }}
       scriptsFolder: $(Pipeline.Workspace)\Cache
       mecmSiteServer: $(MECM_PreProdSiteServer)
       limitingCollectionName: $(MECM_SITLimitingCollectionName)
-      userCollectionName: $(MECM_SITSoftwareCentreCollection)  # "All Users" per Library
-      scheduledCacheTime: $(MECM_ScheduledCacheTime)           # "Now" per Library
-      scheduledInstallTime: $(MECM_ScheduledInstallTime)       # "Now" per Library
+      userCollectionName: $(MECM_SITSoftwareCentreCollection)   # "All Users" per Library
+      scheduledCacheTime: $(MECM_ScheduledCacheTime)            # "Now" per Library
+      scheduledInstallTime: $(MECM_ScheduledInstallTime)        # "Now" per Library
