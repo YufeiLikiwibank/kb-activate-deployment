@@ -30,14 +30,14 @@ variables:
     value: '$(MECM_MsiFolderLocation)\$(BrandFolder)'
 
 stages:
-  # 0) Copy brand MSI to MECM_MsiFolderLocation\<BrandFolder> on SRE-SIT (tag: Activate)
+  # 0) Copy brand MSI to MECM_MsiFolderLocation\<BrandFolder> on SIT (tag: Activate)
   - stage: Upload_MSI
-    displayName: '[SRE-SIT] Copy ${{ parameters.releaseTo }} MSI → $(Effective_MsiFolderLocation)'
+    displayName: '[SIT] Copy ${{ parameters.releaseTo }} MSI → $(Effective_MsiFolderLocation)'
     jobs:
       - deployment: CopyFromUNC
         displayName: 'Copy KB/BB MSI'
         environment:
-          name: 'SRE-SIT'
+          name: 'SIT'
           resourceType: virtualMachine
           tags: 'Activate'
         pool: { vmImage: $(vmImage) }
@@ -57,15 +57,15 @@ stages:
                   # Windows PowerShell is fine here; switch to pwsh:true if you need PowerShell 7
                   pwsh: false
 
-  # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion) on SRE-SIT (tag: Activate)
+  # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion) on SIT (tag: Activate)
   - stage: Detect_Version
-    displayName: '[SRE-SIT] Detect MSI ProductVersion'
+    displayName: '[SIT] Detect MSI ProductVersion'
     dependsOn: Upload_MSI
     jobs:
       - deployment: SetVersion
         displayName: 'Read ProductVersion'
         environment:
-          name: 'SRE-SIT'
+          name: 'SIT'
           resourceType: virtualMachine
           tags: 'Activate'
         pool: { vmImage: $(vmImage) }
@@ -85,9 +85,9 @@ stages:
                       -SetBuildNumber
                   pwsh: false   # use Windows PowerShell for WindowsInstaller COM
 
-  # 2) Bootstrap: copy PS helper scripts on SRE-SIT (tag: Activate)
+  # 2) Bootstrap: copy PS helper scripts on SIT (tag: Activate)
   - stage: Bootstrap_Scripts
-    displayName: '[SRE-SIT] Bootstrap scripts'
+    displayName: '[SIT] Bootstrap scripts'
     dependsOn:
       - Upload_MSI
       - Detect_Version
@@ -95,7 +95,7 @@ stages:
       - deployment: CopyHelpers
         displayName: 'Copy helper scripts'
         environment:
-          name: 'SRE-SIT'
+          name: 'SIT'
           resourceType: virtualMachine
           tags: 'Activate'
         pool: { vmImage: $(vmImage) }
