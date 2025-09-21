@@ -6,18 +6,16 @@ parameters:
     type: string
     default: 'KB'
     values: ['KB','BB']
+
   - name: SourceRepo
     displayName: 'Full UNC path of the MSI repo (no trailing "\") e.g. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate'
     type: string
     default: ''
 
 variables:
-  - group: Activate-SIT   # provides MECM_* variables
+  - group: Activate-SIT   # brings MECM_* variables from your Library
 
-  - name: vmImage
-    value: 'windows-2022'
-
-  # Brand subfolder name (compile-time)
+  # Compile-time brand subfolder
   - ${{ if eq(parameters.releaseTo, 'KB') }}:
     - name: BrandFolder
       value: 'ActivateKB'
@@ -25,88 +23,96 @@ variables:
     - name: BrandFolder
       value: 'ActivateBB'
 
-  # Effective MSI directory used by both scripts/templates
+  # Effective MSI directory used by scripts/templates
   - name: Effective_MsiFolderLocation
     value: '$(MECM_MsiFolderLocation)\$(BrandFolder)'
-    
-# 0) Copy brand MSI to MECM_MsiFolderLocation\<BrandFolder>
-stage: Upload_MSI
-  displayName: '[SRE-SIT] Copy MSI'
-  jobs:
-    - deployment: CopyFromUNC
-      displayName: 'Copy KB/BB MSI'
-      environment:
-        name: 'SRE-SIT'
-        resourceType: virtualMachine
-        tags: 'Activate'
-      strategy:
-        runOnce:
-          deploy:
-            steps:
-              - checkout: self          # <-- make sure the repo is present on the VM
-              - powershell: |
-                  Write-Host "Repo root: $(Build.SourcesDirectory)"
-                  Get-ChildItem -Path "$(Build.SourcesDirectory)\scripts" -Force
-                displayName: 'Sanity: list scripts folder'
 
-              - task: PowerShell@2
-                name: copy
-                displayName: 'Copy brand MSI to destination'
-                inputs:
-                  filePath: '$(Build.SourcesDirectory)\scripts\UploadMSI.ps1'   # <-- absolute path
-                  arguments: >
-                    -SourceRoot "${{ parameters.SourceRepo }}"
-                    -DestinationRoot "$(MECM_MsiFolderLocation)"
-                    -Brand "${{ parameters.releaseTo }}"
-                pwsh: false
+stages:
+  # 0) Copy brand MSI to MECM_MsiFolderLocation\<BrandFolder> on SRE-SIT (tag: Activate)
+  - stage: Upload_MSI
+    displayName: '[SRE-SIT] Copy ${{ parameters.releaseTo }} MSI → $(Effective_MsiFolderLocation)'
+    jobs:
+      - deployment: CopyFromUNC
+        displayName: 'Copy KB/BB MSI'
+        environment:
+          name: 'SRE-SIT'
+          resourceType: virtualMachine
+          tags: 'Activate'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
 
-# 1) Detect MSI ProductVersion → $(revisionVersion)
-- stage: Detect_Version
-  displayName: '[SRE-SIT] Detect MSI ProductVersion'
-  dependsOn: Upload_MSI
-  jobs:
-    - deployment: SetVersion
-      displayName: 'Read ProductVersion'
-      environment:
-        name: 'SRE-SIT'
-        resourceType: virtualMachine
-        tags: 'Activate'
-      strategy:
-        runOnce:
-          deploy:
-            steps:
-              - checkout: self
-              - task: PowerShell@2
-                name: detect
-                displayName: 'Detect ProductVersion from MSI'
-                inputs:
-                  filePath: '$(Build.SourcesDirectory)\scripts\Detect-MsiVersion.ps1'
-                  arguments: >
-                    -Folder "$(Effective_MsiFolderLocation)"
-                    -Filter "*.msi"
-                    -VariableName "revisionVersion"
-                    -SetBuildNumber
-                pwsh: false
+                - powershell: |
+                    Write-Host "Repo root: $(Build.SourcesDirectory)"
+                    Write-Host "Dest root: $(MECM_MsiFolderLocation)"
+                    Write-Host "Brand folder: $(BrandFolder)"
+                    Get-ChildItem -Path "$(Build.SourcesDirectory)\scripts" -Force
+                  displayName: 'Sanity: list scripts folder'
 
-# 2) Bootstrap: copy PS helper scripts
-- stage: Bootstrap_Scripts
-  displayName: '[SRE-SIT] Bootstrap scripts'
-  dependsOn: [Upload_MSI, Detect_Version]
-  jobs:
-    - deployment: CopyHelpers
-      environment:
-        name: 'SRE-SIT'
-        resourceType: virtualMachine
-        tags: 'Activate'
-      strategy:
-        runOnce:
-          deploy:
-            steps:
-              - checkout: self
-              - powershell: |
-                  New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
-                  Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
-                displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
+                - task: PowerShell@2
+                  name: copy
+                  displayName: 'Copy brand MSI to destination'
+                  inputs:
+                    filePath: '$(Build.SourcesDirectory)\scripts\UploadMSI.ps1'
+                    arguments: >
+                      -SourceRoot "${{ parameters.SourceRepo }}"
+                      -DestinationRoot "$(MECM_MsiFolderLocation)"
+                      -Brand "${{ parameters.releaseTo }}"
+                  pwsh: false   # use Windows PowerShell
+
+  # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion) on SRE-SIT
+  - stage: Detect_Version
+    displayName: '[SRE-SIT] Detect MSI ProductVersion'
+    dependsOn: Upload_MSI
+    jobs:
+      - deployment: SetVersion
+        displayName: 'Read ProductVersion'
+        environment:
+          name: 'SRE-SIT'
+          resourceType: virtualMachine
+          tags: 'Activate'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: PowerShell@2
+                  name: detect
+                  displayName: 'Detect ProductVersion from MSI'
+                  inputs:
+                    filePath: '$(Build.SourcesDirectory)\scripts\Detect-MsiVersion.ps1'
+                    arguments: >
+                      -Folder "$(Effective_MsiFolderLocation)"
+                      -Filter "*.msi"
+                      -VariableName "revisionVersion"
+                      -SetBuildNumber
+                  pwsh: false   # WindowsInstaller COM needs Windows PowerShell
+
+  # 2) Bootstrap: copy PS helper scripts on SRE-SIT
+  - stage: Bootstrap_Scripts
+    displayName: '[SRE-SIT] Bootstrap scripts'
+    dependsOn:
+      - Upload_MSI
+      - Detect_Version
+    jobs:
+      - deployment: CopyHelpers
+        displayName: 'Copy helper scripts'
+        environment:
+          name: 'SRE-SIT'
+          resourceType: virtualMachine
+          tags: 'Activate'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - powershell: |
+                    New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
+                    Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
+                  displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
 
 
   # # 3) Create/brand/distribute the application (shared DPs/collections)
