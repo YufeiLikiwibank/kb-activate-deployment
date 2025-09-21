@@ -54,8 +54,7 @@ stages:
                       -SourceRoot "${{ parameters.SourceRepo }}"
                       -DestinationRoot "$(MECM_MsiFolderLocation)"
                       -Brand "${{ parameters.releaseTo }}"
-                  # Windows PowerShell is fine here; switch to pwsh:true if you need PowerShell 7
-                  pwsh: false
+
 
   # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion) on SIT (tag: Activate)
   - stage: Detect_Version
@@ -83,7 +82,7 @@ stages:
                       -Filter "*.msi"
                       -VariableName "revisionVersion"
                       -SetBuildNumber
-                  pwsh: false   # use Windows PowerShell for WindowsInstaller COM
+
 
   # 2) Bootstrap: copy PS helper scripts on SIT (tag: Activate)
   - stage: Bootstrap_Scripts
