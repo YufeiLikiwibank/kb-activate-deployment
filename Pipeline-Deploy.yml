@@ -1,30 +1,23 @@
 trigger: none
 pr: none
 
-# SIT-only pipeline with brand subfolder under MECM_MsiFolderLocation
-
 parameters:
   - name: releaseTo
     type: string
     default: 'KB'
     values: ['KB','BB']
-
   - name: SourceRepo
     displayName: 'Full UNC path of the MSI repo (no trailing "\") e.g. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate'
     type: string
     default: ''
 
 variables:
-  # From Library → Activate-SIT:
-  # MECM_ApplicationFolderpath, MECM_MsiFolderLocation, MECM_PreProdSiteServer,
-  # MECM_PVTCollection, MECM_ScheduledCacheTime, MECM_ScheduledInstallTime,
-  # MECM_SITContentDistributionPoints, MECM_SITLimitingCollectionName, MECM_SITSoftwareCentreCollection
-  - group: Activate-SIT
+  - group: Activate-SIT   # provides MECM_* variables
 
   - name: vmImage
     value: 'windows-2022'
 
-  # Compile-time brand folder name
+  # Brand subfolder name (compile-time)
   - ${{ if eq(parameters.releaseTo, 'KB') }}:
     - name: BrandFolder
       value: 'ActivateKB'
@@ -32,65 +25,89 @@ variables:
     - name: BrandFolder
       value: 'ActivateBB'
 
-  # Effective MSI directory used by all downstream templates
+  # Effective MSI directory used by both scripts/templates
   - name: Effective_MsiFolderLocation
     value: '$(MECM_MsiFolderLocation)\$(BrandFolder)'
 
 stages:
-  # 0) Copy brand MSI to MECM_MsiFolderLocation\<BrandFolder>
+  # 0) Copy brand MSI to MECM_MsiFolderLocation\<BrandFolder> on SRE-SIT (tag: Activate)
   - stage: Upload_MSI
-    displayName: 'Copy brand MSI → $(Effective_MsiFolderLocation)'
+    displayName: '[SRE-SIT] Copy ${{ parameters.releaseTo }} MSI → $(Effective_MsiFolderLocation)'
     jobs:
-      - job: CopyFromUNC
+      - deployment: CopyFromUNC
         displayName: 'Copy KB/BB MSI'
+        environment:
+          name: 'SRE-SIT'
+          resourceType: virtualMachine
+          tags: 'Activate'
         pool: { vmImage: $(vmImage) }
-        steps:
-          - task: PowerShell@2
-            name: copy
-            displayName: 'Copy brand MSI to destination'
-            inputs:
-              filePath: 'scripts/UploadMSI.ps1'
-              arguments: >
-                -SourceRoot "${{ parameters.SourceRepo }}"
-                -DestinationRoot "$(MECM_MsiFolderLocation)"
-                -Brand "${{ parameters.releaseTo }}"
-              pwsh: false
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: PowerShell@2
+                  name: copy
+                  displayName: 'Copy brand MSI to destination'
+                  inputs:
+                    filePath: 'scripts/UploadMSI.ps1'
+                    arguments: >
+                      -SourceRoot "${{ parameters.SourceRepo }}"
+                      -DestinationRoot "$(MECM_MsiFolderLocation)"
+                      -Brand "${{ parameters.releaseTo }}"
+                  # Windows PowerShell is fine here; switch to pwsh:true if you need PowerShell 7
+                  pwsh: false
 
-  # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion)
+  # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion) on SRE-SIT (tag: Activate)
   - stage: Detect_Version
-    displayName: 'Detect MSI ProductVersion'
+    displayName: '[SRE-SIT] Detect MSI ProductVersion'
     dependsOn: Upload_MSI
     jobs:
-      - job: SetVersion
-        displayName: 'Read version from MSI'
+      - deployment: SetVersion
+        displayName: 'Read ProductVersion'
+        environment:
+          name: 'SRE-SIT'
+          resourceType: virtualMachine
+          tags: 'Activate'
         pool: { vmImage: $(vmImage) }
-        steps:
-          - task: PowerShell@2
-            name: detect
-            displayName: 'Detect ProductVersion from MSI'
-            inputs:
-              filePath: 'scripts/Detect-MsiVersion.ps1'
-              arguments: >
-                -Folder "$(Effective_MsiFolderLocation)"
-                -Filter "*.msi"
-                -VariableName "revisionVersion"
-                -SetBuildNumber
-              pwsh: false   # use Windows PowerShell for WindowsInstaller COM
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: PowerShell@2
+                  name: detect
+                  displayName: 'Detect ProductVersion from MSI'
+                  inputs:
+                    filePath: 'scripts/Detect-MsiVersion.ps1'
+                    arguments: >
+                      -Folder "$(Effective_MsiFolderLocation)"
+                      -Filter "*.msi"
+                      -VariableName "revisionVersion"
+                      -SetBuildNumber
+                  pwsh: false   # use Windows PowerShell for WindowsInstaller COM
 
-  # 2) Bootstrap: copy PS scripts for downstream templates
+  # 2) Bootstrap: copy PS helper scripts on SRE-SIT (tag: Activate)
   - stage: Bootstrap_Scripts
-    displayName: 'Bootstrap scripts'
+    displayName: '[SRE-SIT] Bootstrap scripts'
     dependsOn:
       - Upload_MSI
       - Detect_Version
     jobs:
-      - job: Copy
+      - deployment: CopyHelpers
+        displayName: 'Copy helper scripts'
+        environment:
+          name: 'SRE-SIT'
+          resourceType: virtualMachine
+          tags: 'Activate'
         pool: { vmImage: $(vmImage) }
-        steps:
-          - powershell: |
-              New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
-              Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
-            displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - powershell: |
+                    New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
+                    Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
+                  displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
+
 
   # # 3) Create/brand/distribute the application (shared DPs/collections)
   # - template: ../templates/MECMApplicationTemplate.yml
