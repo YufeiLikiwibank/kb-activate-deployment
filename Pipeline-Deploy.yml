@@ -76,7 +76,7 @@ stages:
                   name: detect
                   displayName: 'Detect ProductVersion from MSI'
                   inputs:
-                    filePath: 'scripts/Detect-MsiVersion.ps1'
+                    filePath: '$(Build.SourcesDirectory)\scripts\Detect-MsiVersion.ps1'
                     arguments: >
                       -Folder "$(Effective_MsiFolderLocation)"
                       -Filter "*.msi"
