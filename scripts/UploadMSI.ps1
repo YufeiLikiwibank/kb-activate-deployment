@@ -1,42 +1,43 @@
-[CmdletBinding()]
 param(
-  [Parameter(Mandatory)][string]$SourceRepo,            # UNC root
-  [Parameter(Mandatory)][string]$OutputDir,             # e.g. $(Build.SourcesDirectory)\drop
-  [Parameter()][string]$MsiFileName = '',               # exact name (optional)
-  [Parameter()][string]$MsiPattern = 'Activate.*\.msi', # regex-ish
-  [Parameter()][ValidateSet('x86','x64','any')][string]$PreferArch = 'any'
+    [Parameter(Mandatory = $true)][string]$SourceRoot,       # UNC root, no trailing '\'
+    [Parameter(Mandatory = $true)][string]$DestinationRoot,  # e.g. \\kbcfgmgresource\apps$\Workstation\Pipeline
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('KB','BB')]
+    [string]$Brand,                                          # KB or BB
+    [switch]$KeepExisting                                    # if set, don't clean old MSIs in dest
 )
 
 $ErrorActionPreference = 'Stop'
-if ([string]::IsNullOrWhiteSpace($SourceRepo)) { throw "SourceRepo is empty." }
-if (-not (Test-Path $SourceRepo)) { throw "SourceRepo not found: $SourceRepo" }
 
-$archRegex = switch ($PreferArch) {
-  'x64' { '(?i)(x64|amd64|win64|64-bit)' }
-  'x86' { '(?i)(x86|win32|32-bit)' }
-  default { '' }
+if (-not (Test-Path -LiteralPath $SourceRoot)) {
+    throw "Source path not found: $SourceRoot"
 }
 
-$items = Get-ChildItem -Path $SourceRepo -Filter *.msi -Recurse
-if ($MsiPattern) { $items = $items | Where-Object { $_.Name -match $MsiPattern } }
-if ($archRegex -and -not $MsiFileName) { $items = $items | Where-Object { $_.Name -match $archRegex } }
+# Pick brand pattern
+$pattern = if ($Brand -eq 'KB') { 'ActivateKB*.msi' } else { 'ActivateBB*.msi' }
 
-$msi = $null
-if ($MsiFileName) {
-  $cand = Join-Path $SourceRepo $MsiFileName
-  if (-not (Test-Path $cand)) { throw "Specified MsiFileName not found: $cand" }
-  $msi = Get-Item $cand
-} else {
-  $msi = $items | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+# Select newest matching MSI from source
+$msi = Get-ChildItem -LiteralPath $SourceRoot -Filter $pattern -File |
+       Sort-Object LastWriteTime -Descending |
+       Select-Object -First 1
+
+if (-not $msi) { throw "No MSI found in '$SourceRoot' matching '$pattern'." }
+
+# Brand subfolder under destination root
+$brandFolderName = "Activate$Brand"
+$destFolder = Join-Path -Path $DestinationRoot -ChildPath $brandFolderName
+New-Item -ItemType Directory -Path $destFolder -Force | Out-Null
+
+if (-not $KeepExisting) {
+    Get-ChildItem -LiteralPath $destFolder -Filter '*.msi' -File -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
-if (-not $msi) { throw "No MSI found after filtering (pattern='$MsiPattern', arch='$PreferArch')." }
+Copy-Item -LiteralPath $msi.FullName -Destination $destFolder -Force
 
-New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-Copy-Item -Path $msi.FullName -Destination $OutputDir -Force
+Write-Host "Copied: $($msi.FullName)  →  $destFolder"
 
-$dest = Join-Path $OutputDir $msi.Name
-Write-Host "Selected MSI: $($msi.FullName)"
-Write-Host "Copied to: $dest"
-Write-Host "##vso[task.setvariable variable=MsiLocalPath;isOutput=true]$dest"
-Write-Host "##vso[task.setvariable variable=MsiFileName;isOutput=true]$($msi.Name)"
+# Expose outputs for downstream stages if needed
+Write-Host "##vso[task.setvariable variable=BrandFolder;isOutput=true]$brandFolderName"
+Write-Host "##vso[task.setvariable variable=EffectiveMsiFolder;isOutput=true]$destFolder"
+Write-Host "##vso[task.setvariable variable=CopiedMsiName;isOutput=true]$($msi.Name)"
