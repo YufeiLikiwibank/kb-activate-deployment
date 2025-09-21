@@ -92,44 +92,44 @@ stages:
               Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
             displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
 
-  # 3) Create/brand/distribute the application (shared DPs/collections)
-  - template: ../templates/MECMApplicationTemplate.yml
-    parameters:
-      dryRun: False
-      taskGroupName: "Scheduled${{ parameters.releaseTo }}"
-      revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
-      releaseTo: ${{ parameters.releaseTo }}
-      sourceFolder: '$(Build.SourcesDirectory)\InTouch Client'
-      scriptsFolder: $(Pipeline.Workspace)\Cache
-      mecmSiteServer: $(MECM_PreProdSiteServer)
-      msiFolderLocation: $(Effective_MsiFolderLocation)          # brand subfolder
-      applicationFolderPath: $(MECM_ApplicationFolderpath)
-      contentDistributionPoints: $(MECM_SITContentDistributionPoints)
+  # # 3) Create/brand/distribute the application (shared DPs/collections)
+  # - template: ../templates/MECMApplicationTemplate.yml
+  #   parameters:
+  #     dryRun: False
+  #     taskGroupName: "Scheduled${{ parameters.releaseTo }}"
+  #     revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
+  #     releaseTo: ${{ parameters.releaseTo }}
+  #     sourceFolder: '$(Build.SourcesDirectory)\InTouch Client'
+  #     scriptsFolder: $(Pipeline.Workspace)\Cache
+  #     mecmSiteServer: $(MECM_PreProdSiteServer)
+  #     msiFolderLocation: $(Effective_MsiFolderLocation)          # brand subfolder
+  #     applicationFolderPath: $(MECM_ApplicationFolderpath)
+  #     contentDistributionPoints: $(MECM_SITContentDistributionPoints)
 
-  # 4) Make application Available to PVT users (shared)
-  - template: ../templates/MECMAvailableDeploymentTemplate.yml
-    parameters:
-      dryRun: False
-      taskGroupName: "PVT${{ parameters.releaseTo }}"
-      revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
-      releaseTo: ${{ parameters.releaseTo }}
-      scriptsFolder: $(Pipeline.Workspace)\Cache
-      mecmSiteServer: $(MECM_PreProdSiteServer)
-      limitingCollectionName: $(MECM_SITLimitingCollectionName)
-      userCollectionName: $(MECM_PVTCollection)
-      scheduledInstallTime: $(MECM_ScheduledCacheTime)
-      refreshDeviceCollection: false
+  # # 4) Make application Available to PVT users (shared)
+  # - template: ../templates/MECMAvailableDeploymentTemplate.yml
+  #   parameters:
+  #     dryRun: False
+  #     taskGroupName: "PVT${{ parameters.releaseTo }}"
+  #     revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
+  #     releaseTo: ${{ parameters.releaseTo }}
+  #     scriptsFolder: $(Pipeline.Workspace)\Cache
+  #     mecmSiteServer: $(MECM_PreProdSiteServer)
+  #     limitingCollectionName: $(MECM_SITLimitingCollectionName)
+  #     userCollectionName: $(MECM_PVTCollection)
+  #     scheduledInstallTime: $(MECM_ScheduledCacheTime)
+  #     refreshDeviceCollection: false
 
-  # 5) Make application Required for SIT groups (shared)
-  - template: ../templates/MECMRequiredDeploymentTemplate.yml
-    parameters:
-      dryRun: False
-      taskGroupName: "Scheduled${{ parameters.releaseTo }}"
-      revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
-      releaseTo: ${{ parameters.releaseTo }}
-      scriptsFolder: $(Pipeline.Workspace)\Cache
-      mecmSiteServer: $(MECM_PreProdSiteServer)
-      limitingCollectionName: $(MECM_SITLimitingCollectionName)
-      userCollectionName: $(MECM_SITSoftwareCentreCollection)
-      scheduledCacheTime: $(MECM_ScheduledCacheTime)
-      scheduledInstallTime: $(MECM_ScheduledInstallTime)
+  # # 5) Make application Required for SIT groups (shared)
+  # - template: ../templates/MECMRequiredDeploymentTemplate.yml
+  #   parameters:
+  #     dryRun: False
+  #     taskGroupName: "Scheduled${{ parameters.releaseTo }}"
+  #     revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
+  #     releaseTo: ${{ parameters.releaseTo }}
+  #     scriptsFolder: $(Pipeline.Workspace)\Cache
+  #     mecmSiteServer: $(MECM_PreProdSiteServer)
+  #     limitingCollectionName: $(MECM_SITLimitingCollectionName)
+  #     userCollectionName: $(MECM_SITSoftwareCentreCollection)
+  #     scheduledCacheTime: $(MECM_ScheduledCacheTime)
+  #     scheduledInstallTime: $(MECM_ScheduledInstallTime)
