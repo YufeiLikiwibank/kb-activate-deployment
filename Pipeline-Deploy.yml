@@ -8,14 +8,14 @@ parameters:
     type: string
     default: 'KB'
     values: ['KB','BB']
-  - name: SourceRepo
-  displayName: Enter full UNC FQDN Path of the x64 MSI (DO NOT ADD trailing "\" eg. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate)
-  type: string
-  default:
 
+  - name: SourceRepo
+    displayName: 'Enter full UNC FQDN Path of the x64 MSI (DO NOT add trailing "\" e.g. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate)'
+    type: string
+    default: ''   # leave blank to skip Upload_MSI stage
 
 variables:
-  # Imports from Library → Activate-SIT
+  # Imports from Library → Activate-SIT:
   # MECM_ApplicationFolderpath, MECM_MsiFolderLocation, MECM_PreProdSiteServer,
   # MECM_PVTCollection, MECM_ScheduledCacheTime, MECM_ScheduledInstallTime,
   # MECM_SITContentDistributionPoints, MECM_SITLimitingCollectionName, MECM_SITSoftwareCentreCollection
@@ -45,10 +45,23 @@ stages:
                 -SetBuildNumber
               pwsh: false   # use Windows PowerShell for WindowsInstaller COM
 
-  # 1) Bootstrap: copy PS scripts for templates
+  # (Optional) 1) Upload MSI from UNC if provided
+  # Only include this stage if SourceRepo is not empty
+  - ${{ if ne(parameters.SourceRepo, '') }}:
+    - template: Template-PublishArtifact.yml
+      parameters:
+        stageName: 'Upload_MSI'
+        stageDisplayName: 'Upload MSI'
+        SourceRepo: ${{ parameters.SourceRepo }}
+        envName: 'PRD-WLG'
+
+  # 2) Bootstrap: copy PS scripts for templates
   - stage: Bootstrap_Scripts
     displayName: 'Bootstrap scripts'
-    dependsOn: Detect_Version
+    dependsOn:
+      - Detect_Version
+      # Include Upload_MSI in the dependency graph only if it exists
+      - ${{ if ne(parameters.SourceRepo, '') }}: Upload_MSI
     jobs:
       - job: Copy
         pool: { vmImage: $(vmImage) }
@@ -57,16 +70,8 @@ stages:
               New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
               Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
             displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
-    
-    - template: Template-PublishArtifact.yml
-    parameters:
-      stageName: 'Upload_MSI'
-      stageDisplayName: 'Upload MSI'
-      SourceRepo: ${{parameters.SourceRepo}}
-      envName: 'PRD-WLG'
-      condition: succeeded()
 
-  # 2) Create/brand/distribute the application (SIT)
+  # 3) Create/brand/distribute the application (SIT)
   - template: ../templates/MECMApplicationTemplate.yml
     parameters:
       dryRun: False
@@ -80,7 +85,7 @@ stages:
       applicationFolderPath: $(MECM_ApplicationFolderpath)
       contentDistributionPoints: $(MECM_SITContentDistributionPoints)
 
-  # 3) Make application Available to PVT users (SIT)
+  # 4) Make application Available to PVT users (SIT)
   - template: ../templates/MECMAvailableDeploymentTemplate.yml
     parameters:
       dryRun: False
@@ -91,10 +96,10 @@ stages:
       mecmSiteServer: $(MECM_PreProdSiteServer)
       limitingCollectionName: $(MECM_SITLimitingCollectionName)
       userCollectionName: $(MECM_PVTCollection)
-      scheduledInstallTime: $(MECM_ScheduledCacheTime)   # "Now" (from Library)
+      scheduledInstallTime: $(MECM_ScheduledCacheTime)   # "Now" from Library
       refreshDeviceCollection: false
 
-  # 4) Make application Required for SIT groups (scheduled install)
+  # 5) Make application Required for SIT groups (scheduled install)
   - template: ../templates/MECMRequiredDeploymentTemplate.yml
     parameters:
       dryRun: False
