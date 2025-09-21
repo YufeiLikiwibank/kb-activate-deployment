@@ -49,7 +49,7 @@ stages:
             name: copy
             displayName: 'Copy brand MSI to destination'
             inputs:
-              filePath: 'scripts/CUploadMSI.ps1'
+              filePath: 'scripts/UploadMSI.ps1'
               arguments: >
                 -SourceRoot "${{ parameters.SourceRepo }}"
                 -DestinationRoot "$(MECM_MsiFolderLocation)"
