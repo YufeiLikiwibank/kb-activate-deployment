@@ -1,7 +1,7 @@
 trigger: none
 pr: none
 
-# SIT-only pipeline using Activate-SIT library values
+# SIT-only pipeline with brand subfolder under MECM_MsiFolderLocation
 
 parameters:
   - name: releaseTo
@@ -10,12 +10,12 @@ parameters:
     values: ['KB','BB']
 
   - name: SourceRepo
-    displayName: 'Enter full UNC FQDN Path of the x64 MSI (DO NOT add trailing "\" e.g. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate)'
+    displayName: 'Full UNC path of the MSI repo (no trailing "\") e.g. \\kbshares.corp.bank.nzpfs.co.nz\releases\_Drop\Activate'
     type: string
-    default: ''   # leave blank to skip Upload_MSI stage
+    default: ''
 
 variables:
-  # Imports from Library → Activate-SIT:
+  # From Library → Activate-SIT:
   # MECM_ApplicationFolderpath, MECM_MsiFolderLocation, MECM_PreProdSiteServer,
   # MECM_PVTCollection, MECM_ScheduledCacheTime, MECM_ScheduledInstallTime,
   # MECM_SITContentDistributionPoints, MECM_SITLimitingCollectionName, MECM_SITSoftwareCentreCollection
@@ -24,10 +24,42 @@ variables:
   - name: vmImage
     value: 'windows-2022'
 
+  # Compile-time brand folder name
+  - ${{ if eq(parameters.releaseTo, 'KB') }}:
+    - name: BrandFolder
+      value: 'ActivateKB'
+  - ${{ if eq(parameters.releaseTo, 'BB') }}:
+    - name: BrandFolder
+      value: 'ActivateBB'
+
+  # Effective MSI directory used by all downstream templates
+  - name: Effective_MsiFolderLocation
+    value: '$(MECM_MsiFolderLocation)\$(BrandFolder)'
+
 stages:
-  # 0) Detect MSI ProductVersion -> revisionVersion
+  # 0) Copy brand MSI to MECM_MsiFolderLocation\<BrandFolder>
+  - stage: Upload_MSI
+    displayName: 'Copy brand MSI → $(Effective_MsiFolderLocation)'
+    jobs:
+      - job: CopyFromUNC
+        displayName: 'Copy KB/BB MSI'
+        pool: { vmImage: $(vmImage) }
+        steps:
+          - task: PowerShell@2
+            name: copy
+            displayName: 'Copy brand MSI to destination'
+            inputs:
+              filePath: 'scripts/Copy-Msi.ps1'
+              arguments: >
+                -SourceRoot "${{ parameters.SourceRepo }}"
+                -DestinationRoot "$(MECM_MsiFolderLocation)"
+                -Brand "${{ parameters.releaseTo }}"
+              pwsh: false
+
+  # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion)
   - stage: Detect_Version
     displayName: 'Detect MSI ProductVersion'
+    dependsOn: Upload_MSI
     jobs:
       - job: SetVersion
         displayName: 'Read version from MSI'
@@ -39,29 +71,18 @@ stages:
             inputs:
               filePath: 'scripts/Detect-MsiVersion.ps1'
               arguments: >
-                -Folder "$(MECM_MsiFolderLocation)"
-                -Filter "Activate*.msi"
+                -Folder "$(Effective_MsiFolderLocation)"
+                -Filter "*.msi"
                 -VariableName "revisionVersion"
                 -SetBuildNumber
               pwsh: false   # use Windows PowerShell for WindowsInstaller COM
 
-  # (Optional) 1) Upload MSI from UNC if provided
-  # Only include this stage if SourceRepo is not empty
-  - ${{ if ne(parameters.SourceRepo, '') }}:
-    - template: Template-PublishArtifact.yml
-      parameters:
-        stageName: 'Upload_MSI'
-        stageDisplayName: 'Upload MSI'
-        SourceRepo: ${{ parameters.SourceRepo }}
-        envName: 'PRD-WLG'
-
-  # 2) Bootstrap: copy PS scripts for templates
+  # 2) Bootstrap: copy PS scripts for downstream templates
   - stage: Bootstrap_Scripts
     displayName: 'Bootstrap scripts'
     dependsOn:
+      - Upload_MSI
       - Detect_Version
-      # Include Upload_MSI in the dependency graph only if it exists
-      - ${{ if ne(parameters.SourceRepo, '') }}: Upload_MSI
     jobs:
       - job: Copy
         pool: { vmImage: $(vmImage) }
@@ -71,7 +92,7 @@ stages:
               Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
             displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
 
-  # 3) Create/brand/distribute the application (SIT)
+  # 3) Create/brand/distribute the application (shared DPs/collections)
   - template: ../templates/MECMApplicationTemplate.yml
     parameters:
       dryRun: False
@@ -81,11 +102,11 @@ stages:
       sourceFolder: '$(Build.SourcesDirectory)\InTouch Client'
       scriptsFolder: $(Pipeline.Workspace)\Cache
       mecmSiteServer: $(MECM_PreProdSiteServer)
-      msiFolderLocation: $(MECM_MsiFolderLocation)
+      msiFolderLocation: $(Effective_MsiFolderLocation)          # brand subfolder
       applicationFolderPath: $(MECM_ApplicationFolderpath)
       contentDistributionPoints: $(MECM_SITContentDistributionPoints)
 
-  # 4) Make application Available to PVT users (SIT)
+  # 4) Make application Available to PVT users (shared)
   - template: ../templates/MECMAvailableDeploymentTemplate.yml
     parameters:
       dryRun: False
@@ -96,10 +117,10 @@ stages:
       mecmSiteServer: $(MECM_PreProdSiteServer)
       limitingCollectionName: $(MECM_SITLimitingCollectionName)
       userCollectionName: $(MECM_PVTCollection)
-      scheduledInstallTime: $(MECM_ScheduledCacheTime)   # "Now" from Library
+      scheduledInstallTime: $(MECM_ScheduledCacheTime)
       refreshDeviceCollection: false
 
-  # 5) Make application Required for SIT groups (scheduled install)
+  # 5) Make application Required for SIT groups (shared)
   - template: ../templates/MECMRequiredDeploymentTemplate.yml
     parameters:
       dryRun: False
@@ -109,6 +130,6 @@ stages:
       scriptsFolder: $(Pipeline.Workspace)\Cache
       mecmSiteServer: $(MECM_PreProdSiteServer)
       limitingCollectionName: $(MECM_SITLimitingCollectionName)
-      userCollectionName: $(MECM_SITSoftwareCentreCollection)   # "All Users" per Library
-      scheduledCacheTime: $(MECM_ScheduledCacheTime)            # "Now" per Library
-      scheduledInstallTime: $(MECM_ScheduledInstallTime)        # "Now" per Library
+      userCollectionName: $(MECM_SITSoftwareCentreCollection)
+      scheduledCacheTime: $(MECM_ScheduledCacheTime)
+      scheduledInstallTime: $(MECM_ScheduledInstallTime)
