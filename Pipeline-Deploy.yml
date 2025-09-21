@@ -30,7 +30,7 @@ variables:
     value: '$(MECM_MsiFolderLocation)\$(BrandFolder)'
     
 # 0) Copy brand MSI to MECM_MsiFolderLocation\<BrandFolder>
-- stage: Upload_MSI
+stage: Upload_MSI
   displayName: '[SRE-SIT] Copy MSI'
   jobs:
     - deployment: CopyFromUNC
