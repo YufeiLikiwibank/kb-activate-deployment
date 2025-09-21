@@ -31,7 +31,7 @@ $version = $rec.StringData(1)
 Write-Host "Found MSI: $($msi.Name)"
 Write-Host "ProductVersion: $version"
 
-# Set both a normal variable and an output variable for cross-stage use
+# Set variables for pipeline use
 Write-Host "##vso[task.setvariable variable=$VariableName]$version"
 Write-Host "##vso[task.setvariable variable=$VariableName;isOutput=true]$version"
 
