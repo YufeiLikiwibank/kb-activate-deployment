@@ -13,16 +13,12 @@ parameters:
 
 variables:
   - group: Activate-SIT
-
-  # Brand subfolder
   - ${{ if eq(parameters.releaseTo, 'KB') }}:
     - name: BrandFolder
       value: 'ActivateKB'
   - ${{ if eq(parameters.releaseTo, 'BB') }}:
     - name: BrandFolder
       value: 'ActivateBB'
-
-  # Effective MSI path
   - name: Effective_MsiFolderLocation
     value: '$(MECM_MsiFolderLocation)\$(BrandFolder)'
 
@@ -34,14 +30,23 @@ stages:
       - deployment: CopyFromUNC
         displayName: 'Copy KB/BB MSI'
         environment:
-          name: 'SIT'                 # <-- environment name updated
+          name: 'SIT'
           resourceType: virtualMachine
           tags: 'Activate'
         strategy:
           runOnce:
             deploy:
               steps:
+                # --- Fix Git schannel revocation failure BEFORE checkout ---
+                - powershell: |
+                    git --version
+                    git config --global http.proxy "http://kbsvrpxy-sit.corp.bank.sit.kiwibank.internal:8080"
+                    git config --global http.schannelCheckRevoke false
+                    git config --global -l
+                  displayName: 'Configure Git (proxy + disable revocation check)'
+
                 - checkout: self
+
                 - task: PowerShell@2
                   name: copy
                   displayName: 'Copy brand MSI to destination'
@@ -52,7 +57,7 @@ stages:
                       -SourceRoot "${{ parameters.SourceRepo }}"
                       -DestinationRoot "$(MECM_MsiFolderLocation)"
                       -Brand "${{ parameters.releaseTo }}"
-
+                    pwsh: false
 
   # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion) on SIT
   - stage: Detect_Version
@@ -62,14 +67,20 @@ stages:
       - deployment: SetVersion
         displayName: 'Read ProductVersion'
         environment:
-          name: 'SIT'                 # <-- environment name updated
+          name: 'SIT'
           resourceType: virtualMachine
           tags: 'Activate'
         strategy:
           runOnce:
             deploy:
               steps:
+                # If you want to be extra safe, keep the config here too
+                - powershell: |
+                    git config --global http.schannelCheckRevoke false
+                  displayName: 'Ensure Git revocation check is off'
+
                 - checkout: self
+
                 - task: PowerShell@2
                   name: detect
                   displayName: 'Detect ProductVersion from MSI'
@@ -81,7 +92,7 @@ stages:
                       -Filter "*.msi"
                       -VariableName "revisionVersion"
                       -SetBuildNumber
-
+                    pwsh: false
 
   # 2) Bootstrap: copy PS helper scripts on SIT
   - stage: Bootstrap_Scripts
@@ -93,58 +104,20 @@ stages:
       - deployment: CopyHelpers
         displayName: 'Copy helper scripts'
         environment:
-          name: 'SIT'                 # <-- environment name updated
+          name: 'SIT'
           resourceType: virtualMachine
           tags: 'Activate'
         strategy:
           runOnce:
             deploy:
               steps:
+                - powershell: |
+                    git config --global http.schannelCheckRevoke false
+                  displayName: 'Ensure Git revocation check is off'
+
                 - checkout: self
+
                 - powershell: |
                     New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
                     Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
                   displayName: 'Copy PS scripts to $(Pipeline.Workspace)\Cache'
-
-
-  # # 3) Create/brand/distribute the application (shared DPs/collections)
-  # - template: ../templates/MECMApplicationTemplate.yml
-  #   parameters:
-  #     dryRun: False
-  #     taskGroupName: "Scheduled${{ parameters.releaseTo }}"
-  #     revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
-  #     releaseTo: ${{ parameters.releaseTo }}
-  #     sourceFolder: '$(Build.SourcesDirectory)\InTouch Client'
-  #     scriptsFolder: $(Pipeline.Workspace)\Cache
-  #     mecmSiteServer: $(MECM_PreProdSiteServer)
-  #     msiFolderLocation: $(Effective_MsiFolderLocation)          # brand subfolder
-  #     applicationFolderPath: $(MECM_ApplicationFolderpath)
-  #     contentDistributionPoints: $(MECM_SITContentDistributionPoints)
-
-  # # 4) Make application Available to PVT users (shared)
-  # - template: ../templates/MECMAvailableDeploymentTemplate.yml
-  #   parameters:
-  #     dryRun: False
-  #     taskGroupName: "PVT${{ parameters.releaseTo }}"
-  #     revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
-  #     releaseTo: ${{ parameters.releaseTo }}
-  #     scriptsFolder: $(Pipeline.Workspace)\Cache
-  #     mecmSiteServer: $(MECM_PreProdSiteServer)
-  #     limitingCollectionName: $(MECM_SITLimitingCollectionName)
-  #     userCollectionName: $(MECM_PVTCollection)
-  #     scheduledInstallTime: $(MECM_ScheduledCacheTime)
-  #     refreshDeviceCollection: false
-
-  # # 5) Make application Required for SIT groups (shared)
-  # - template: ../templates/MECMRequiredDeploymentTemplate.yml
-  #   parameters:
-  #     dryRun: False
-  #     taskGroupName: "Scheduled${{ parameters.releaseTo }}"
-  #     revisionVersion: $[ stageDependencies.Detect_Version.SetVersion.outputs['detect.revisionVersion'] ]
-  #     releaseTo: ${{ parameters.releaseTo }}
-  #     scriptsFolder: $(Pipeline.Workspace)\Cache
-  #     mecmSiteServer: $(MECM_PreProdSiteServer)
-  #     limitingCollectionName: $(MECM_SITLimitingCollectionName)
-  #     userCollectionName: $(MECM_SITSoftwareCentreCollection)
-  #     scheduledCacheTime: $(MECM_ScheduledCacheTime)
-  #     scheduledInstallTime: $(MECM_ScheduledInstallTime)
