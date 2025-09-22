@@ -37,13 +37,26 @@ stages:
           runOnce:
             deploy:
               steps:
-                # --- Fix Git schannel revocation failure BEFORE checkout ---
+                # --- Find agent Git and configure it (proxy + disable CRL check) ---
                 - powershell: |
-                    git --version
-                    git config --global http.proxy "http://kbsvrpxy-sit.corp.bank.sit.kiwibank.internal:8080"
-                    git config --global http.schannelCheckRevoke false
-                    git config --global -l
-                  displayName: 'Configure Git (proxy + disable revocation check)'
+                    $agentGit = Join-Path $env:Agent_HomeDirectory 'externals\git\cmd\git.exe'
+                    if (-not (Test-Path $agentGit)) {
+                      $agentGit = 'C:\Program Files\Git\cmd\git.exe'  # fallback if you also have system Git
+                    }
+                    if (-not (Test-Path $agentGit)) { throw "Git not found. Looked for: $agentGit" }
+
+                    Write-Host "Using Git at: $agentGit"
+                    & $agentGit --version
+
+                    # Set corporate proxy if required (adjust or remove if not needed)
+                    & $agentGit config --global http.proxy "http://kbsvrpxy-sit.corp.bank.sit.kiwibank.internal:8080"
+
+                    # Disable Schannel revocation check to avoid 0x80092013
+                    & $agentGit config --global http.schannelCheckRevoke false
+
+                    # (Optional) dump resulting config
+                    & $agentGit config --global -l
+                  displayName: 'Configure Git (use agent Git)'
 
                 - checkout: self
 
@@ -59,7 +72,7 @@ stages:
                       -Brand "${{ parameters.releaseTo }}"
                     pwsh: false
 
-  # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion) on SIT
+  # 1) Detect MSI ProductVersion from the brand folder → $(revisionVersion)
   - stage: Detect_Version
     displayName: '[SIT] Detect MSI ProductVersion'
     dependsOn: Upload_MSI
@@ -74,10 +87,14 @@ stages:
           runOnce:
             deploy:
               steps:
-                # If you want to be extra safe, keep the config here too
+                # Keep the same Git config for safety (idempotent)
                 - powershell: |
-                    git config --global http.schannelCheckRevoke false
-                  displayName: 'Ensure Git revocation check is off'
+                    $agentGit = Join-Path $env:Agent_HomeDirectory 'externals\git\cmd\git.exe'
+                    if (-not (Test-Path $agentGit)) { $agentGit = 'C:\Program Files\Git\cmd\git.exe' }
+                    if (Test-Path $agentGit) {
+                      & $agentGit config --global http.schannelCheckRevoke false
+                    }
+                  displayName: 'Ensure Git Schannel revocation is off'
 
                 - checkout: self
 
@@ -94,7 +111,7 @@ stages:
                       -SetBuildNumber
                     pwsh: false
 
-  # 2) Bootstrap: copy PS helper scripts on SIT
+  # 2) Bootstrap: copy PS helper scripts
   - stage: Bootstrap_Scripts
     displayName: '[SIT] Bootstrap scripts'
     dependsOn:
@@ -111,12 +128,7 @@ stages:
           runOnce:
             deploy:
               steps:
-                - powershell: |
-                    git config --global http.schannelCheckRevoke false
-                  displayName: 'Ensure Git revocation check is off'
-
                 - checkout: self
-
                 - powershell: |
                     New-Item -ItemType Directory -Path "$(Pipeline.Workspace)\Cache" -Force | Out-Null
                     Copy-Item "$(Build.SourcesDirectory)\scripts\*.ps1" "$(Pipeline.Workspace)\Cache" -Force
